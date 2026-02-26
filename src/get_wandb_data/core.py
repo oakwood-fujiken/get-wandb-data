@@ -105,11 +105,14 @@ def get_wandb_data(
         path = "/".join(filter(None, [entity, project, run_id]))
         run = api.run(path)
 
-        # Fetch the history rows for the requested keys.
-        history = run.history(keys=list(keys))
+        # scan_history returns an iterator over *all* logged rows
+        # (run.history() only returns a 500-row sample by default).
+        rows = list(run.scan_history(keys=list(keys)))
 
-        if history.empty:
+        if not rows:
             continue
+
+        history = pd.DataFrame(rows)
 
         # Download media files when requested.
         if download_media:
