@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "get-wandb-data"
+version = "0.1.0"
+description = "Fetch logged data from Weights & Biases runs and return as pandas DataFrame"
+requires-python = ">=3.9"
+dependencies = [
+    "wandb",
+    "pandas",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
