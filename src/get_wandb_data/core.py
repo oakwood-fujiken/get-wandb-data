@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Sequence
 
 import pandas as pd
 import wandb
+
+_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "get_wandb_data"
+
+
+def _cache_path(cache_dir: Path, run_id: str) -> Path:
+    """Return the parquet cache file path for a run."""
+    return cache_dir / f"{run_id}.parquet"
 
 
 def get_wandb_data(
@@ -13,6 +21,7 @@ def get_wandb_data(
     keys: Sequence[str],
     entity: str | None = None,
     project: str | None = None,
+    cache_dir: str | Path | None = None,
 ) -> pd.DataFrame:
     """Fetch specified logged data from multiple W&B runs.
 
@@ -29,6 +38,10 @@ def get_wandb_data(
     project:
         W&B project name.  If ``None``, uses the default project
         configured in the current environment.
+    cache_dir:
+        Directory for the local cache.  Defaults to
+        ``~/.cache/get_wandb_data``.  Each run is stored as a parquet
+        file keyed by run ID; subsequent calls skip the W&B fetch.
 
     Returns
     -------
@@ -42,27 +55,35 @@ def get_wandb_data(
         - ``_step`` – the logging step number
         - one column per requested key
     """
-    api = wandb.Api()
+    cdir = Path(cache_dir) if cache_dir is not None else _DEFAULT_CACHE_DIR
+    cdir.mkdir(parents=True, exist_ok=True)
+
+    api: wandb.Api | None = None  # lazy init — only created when needed
 
     frames: list[pd.DataFrame] = []
 
     for run_id in run_ids:
-        path = "/".join(filter(None, [entity, project, run_id]))
-        run = api.run(path)
+        cached = _cache_path(cdir, run_id)
 
-        # scan_history returns an iterator over *all* logged rows
-        # (run.history() only returns a 500-row sample by default).
-        rows = list(run.scan_history(keys=list(keys)))
+        if cached.exists():
+            history = pd.read_parquet(cached)
+        else:
+            if api is None:
+                api = wandb.Api()
+            path = "/".join(filter(None, [entity, project, run_id]))
+            run = api.run(path)
 
-        if not rows:
-            continue
+            rows = list(run.scan_history(keys=list(keys)))
+            if not rows:
+                continue
 
-        history = pd.DataFrame(rows)
+            history = pd.DataFrame(rows)
+            history["run_id"] = run.id
+            history["run_name"] = run.name
+            history["tags"] = [run.tags] * len(history)
 
-        # Attach run metadata to every row.
-        history["run_id"] = run.id
-        history["run_name"] = run.name
-        history["tags"] = [run.tags] * len(history)
+            # Save to local cache.
+            history.to_parquet(cached, index=False)
 
         frames.append(history)
 
