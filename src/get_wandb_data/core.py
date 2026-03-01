@@ -7,8 +7,12 @@ from typing import Sequence
 
 import pandas as pd
 import wandb
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 
 _DEFAULT_CACHE_DIR = Path.home() / ".cache" / "get_wandb_data"
+
+_console = Console()
 
 
 def _cache_path(cache_dir: Path, run_id: str) -> Path:
@@ -62,30 +66,43 @@ def get_wandb_data(
 
     frames: list[pd.DataFrame] = []
 
-    for run_id in run_ids:
-        cached = _cache_path(cdir, run_id)
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        console=_console,
+    ) as progress:
+        task = progress.add_task("Fetching runs", total=len(run_ids))
 
-        if cached.exists():
-            history = pd.read_parquet(cached)
-        else:
-            if api is None:
-                api = wandb.Api()
-            path = "/".join(filter(None, [entity, project, run_id]))
-            run = api.run(path)
+        for run_id in run_ids:
+            cached = _cache_path(cdir, run_id)
 
-            rows = list(run.scan_history(keys=list(keys)))
-            if not rows:
-                continue
+            if cached.exists():
+                progress.update(task, description=f"[dim]cached[/dim]  {run_id}")
+                history = pd.read_parquet(cached)
+            else:
+                progress.update(task, description=f"[bold]fetch[/bold]   {run_id}")
+                if api is None:
+                    api = wandb.Api()
+                path = "/".join(filter(None, [entity, project, run_id]))
+                run = api.run(path)
 
-            history = pd.DataFrame(rows)
-            history["run_id"] = run.id
-            history["run_name"] = run.name
-            history["tags"] = [run.tags] * len(history)
+                rows = list(run.scan_history(keys=list(keys)))
+                if not rows:
+                    progress.advance(task)
+                    continue
 
-            # Save to local cache.
-            history.to_parquet(cached, index=False)
+                history = pd.DataFrame(rows)
+                history["run_id"] = run.id
+                history["run_name"] = run.name
+                history["tags"] = [run.tags] * len(history)
 
-        frames.append(history)
+                # Save to local cache.
+                history.to_parquet(cached, index=False)
+
+            frames.append(history)
+            progress.advance(task)
 
     if not frames:
         columns = ["run_id", "run_name", "tags", "_step"] + list(keys)
@@ -97,5 +114,9 @@ def get_wandb_data(
     leading = ["run_id", "run_name", "tags"]
     rest = [c for c in df.columns if c not in leading]
     df = df[leading + rest]
+
+    _console.print(
+        f"[green]Done:[/green] {len(df)} rows from {len(run_ids)} run(s)"
+    )
 
     return df
