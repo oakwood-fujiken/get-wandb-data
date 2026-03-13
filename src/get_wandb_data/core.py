@@ -88,7 +88,9 @@ def get_wandb_data(
                 path = "/".join(filter(None, [entity, project, run_id]))
                 run = api.run(path)
 
-                rows = list(run.scan_history(keys=list(keys)))
+                # Always include _step so it appears in the resulting DataFrame.
+                fetch_keys = list(dict.fromkeys(["_step", *keys]))
+                rows = list(run.scan_history(keys=fetch_keys))
                 if not rows:
                     progress.advance(task)
                     continue
