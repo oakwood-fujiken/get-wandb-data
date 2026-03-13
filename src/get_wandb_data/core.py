@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import pandas as pd
 import wandb
@@ -26,6 +26,7 @@ def get_wandb_data(
     entity: str | None = None,
     project: str | None = None,
     cache_dir: str | Path | None = None,
+    display_names: Mapping[str, str] | None = None,
 ) -> pd.DataFrame:
     """Fetch specified logged data from multiple W&B runs.
 
@@ -46,6 +47,11 @@ def get_wandb_data(
         Directory for the local cache.  Defaults to
         ``~/.cache/get_wandb_data``.  Each run is stored as a parquet
         file keyed by run ID; subsequent calls skip the W&B fetch.
+    display_names:
+        Optional mapping of run ID (or run name) to a custom display
+        name.  When provided, the ``run_name`` column is replaced with
+        the mapped value so that plot legends show the desired label.
+        Keys can be either run IDs or W&B run names.
 
     Returns
     -------
@@ -54,7 +60,7 @@ def get_wandb_data(
         one run.  Columns include:
 
         - ``run_id`` – the run ID
-        - ``run_name`` – the human-readable run name
+        - ``run_name`` – the human-readable run name (or display name)
         - ``tags`` – list of tags attached to the run
         - ``_step`` – the logging step number
         - one column per requested key
@@ -116,6 +122,15 @@ def get_wandb_data(
     leading = ["run_id", "run_name", "tags"]
     rest = [c for c in df.columns if c not in leading]
     df = df[leading + rest]
+
+    # Apply custom display names (match on run_id first, then run_name).
+    if display_names:
+        df["run_name"] = df.apply(
+            lambda r: display_names.get(
+                r["run_id"], display_names.get(r["run_name"], r["run_name"])
+            ),
+            axis=1,
+        )
 
     _console.print(
         f"[green]Done:[/green] {len(df)} rows from {len(run_ids)} run(s)"
